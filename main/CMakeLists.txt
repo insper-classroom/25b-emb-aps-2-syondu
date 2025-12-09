@@ -7,7 +7,7 @@ include(FreeRTOS_Kernel_import.cmake)
 
 # Example running FreeRTOS on 1 core
 add_executable(pico_emb
-    mux.c
+    main.c
     controles.c
     )
 

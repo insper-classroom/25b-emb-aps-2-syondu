@@ -12,11 +12,25 @@
 
 // mapear 24 canais (3 mux * 8). último pode ser '\0' se não usado.
 // Ajuste conforme seus caracteres desejados.
+
+/*
 static const char button_map[3][8] = {
     { 'E','F','G','H','A','B','C','D', },   // MUX0 -> botões 0..7
     { 'I','J','K','L','M','N','O','P' },   // MUX1 -> botões 8..15
     { 'Q','R','S','T','U','V','W', '\n' }  // MUX2 -> botões 16..23 (último não usado)
 };
+*/
+static const char button_map[3][8] = {
+    { '8','F','G','H','A','B','C','!', },   // MUX0 -> botões 0..7
+    { 'I','L','R','6','1','2','3','P' },   // MUX1 -> botões 8..15
+    { 'Q','E','7','#','S','W','A', 'D' }  // MUX2 -> botões 16..23 (último não usado)
+};
+
+/*
+# = Click
+! = Esc
+
+*/
 
 // estruturas de estado por mux/canal
 static bool last_raw[3][8];             // último valor cru lido (antes do debounce)

@@ -12,6 +12,32 @@ from tkinter import ttk
 from tkinter import messagebox
 from time import sleep
 
+dic_teclas = {
+    1: lambda: pyautogui.press('space'),   # '&'
+    2: lambda: pyautogui.press('shift'),   # '%'
+    3: lambda: pyautogui.press('scrolllock'), # '@' (ajuste se quiser outro comando)
+    4: lambda: pyautogui.press('esc'),     # '!'
+    5: lambda: pyautogui.press('space'),   # '&'
+    6: lambda: pyautogui.press('shift'),   # '%'
+    7: lambda: pyautogui.press('c'),       # 'C'
+    8: lambda: pyautogui.press('esc'),     # '!'
+    9: lambda: pyautogui.press('i'),       # 'I'
+    10: lambda: pyautogui.press('l'),      # 'L'
+    11: lambda: pyautogui.press('r'),      # 'R'
+    12: lambda: pyautogui.press('g'),      # 'G'
+    13: lambda: pyautogui.press('1'),      # '1'
+    14: lambda: pyautogui.press('2'),      # '2'
+    15: lambda: pyautogui.press('3'),      # '3'
+    16: lambda: pyautogui.press('t'),      # 'T'
+    17: lambda: pyautogui.press('q'),      # 'Q'
+    18: lambda: pyautogui.press('e'),      # 'E'
+    19: lambda: pyautogui.press('7'),      # '7'
+    20: lambda: pyautogui.click(),         # '#' (Click)
+    21: lambda: pyautogui.press('d'),      # 'D'
+    22: lambda: pyautogui.press('a'),      # 'A'
+    23: lambda: pyautogui.press('s'),      # 'S'
+    24: lambda: pyautogui.press('w'),      # 'W'
+}
 
 def move_mouse(axis, value):
   
@@ -26,7 +52,7 @@ def move_mouse(axis, value):
          else:
              pyautogui.press('d')
     elif axis ==3:
-        pyautogui.click()
+        dic_teclas[value]() 
     elif axis==4:
         if value > 0:
              pyautogui.press('w')

@@ -13,10 +13,38 @@
 #include "hardware/uart.h"
 #include <stdbool.h>
 #include <stdint.h>
-
-
-
+#include "controles.h"
 #include "Fusion.h"
+
+static const char button_map[3][8] = {
+    {
+        '&',
+        '%',
+        '@',
+        '!',
+        '&',
+        '%',
+        'C',
+        '!',
+    },                                        // MUX0 -> botões 0..7
+    {'I', 'L', 'R', 'G', '1', '2', '3', 'T'}, // MUX1 -> botões 8..15
+    {'Q', 'E', '7', '#', 'D', 'A', 'S', 'W'}  // MUX2 -> botões 16..23 (último não usado)
+};
+/*
+# = Click
+! = Esc
+& = Space
+% = Shift
+@ = Scroll front/back
+*/
+
+// estruturas de estado por mux/canal
+static bool last_raw[3][8];           // último valor cru lido (antes do debounce)
+static uint32_t last_change_ms[3][8]; // when last_raw changed
+static bool stable_state[3][8];       // estado estável após debounce (true = pressed)
+static bool prev_stable[3][8];        // estado estável na iteração anterior (para detectar borda)
+static uint32_t last_send_ms[3][8];   // último timestamp que enviou caractere (para repeat)
+
 #define SAMPLE_PERIOD (0.1f) // replace this with actual sample period
 
 const int MPU_ADDRESS = 0x68;
@@ -29,6 +57,78 @@ typedef struct adc {
 } adc_t;
 
 QueueHandle_t xQueuePos;
+
+void mux_task(void *p) {
+    // inicializa estados
+    uint32_t t0 = now_ms();
+    for (int m = 0; m < 3; m++) {
+        for (int c = 0; c < 8; c++) {
+            last_raw[m][c] = true; // assumindo pull-up = HIGH quando solto
+            last_change_ms[m][c] = t0;
+            stable_state[m][c] = false;
+            prev_stable[m][c] = false;
+            last_send_ms[m][c] = 0;
+        }
+    }
+
+    while (true) {
+        uint32_t t = now_ms();
+
+        // percorre canais 0..7 (mesma seleção para os 3 MUX)
+        for (uint8_t ch = 0; ch < 8; ch++) {
+            mux_select(ch);
+            // leitura bruta em bloco
+            uint32_t all = gpio_get_all();
+            bool raw3[3];
+            read_three_raw(all, raw3);
+
+            for (int m = 0; m < 3; m++) {
+                bool raw = raw3[m]; // 1 = solto, 0 = pressed
+                bool raw_pressed = (raw == 0);
+
+                // atualiza last_raw & last_change_ms
+                if (raw_pressed != last_raw[m][ch]) {
+                    last_raw[m][ch] = raw_pressed;
+                    last_change_ms[m][ch] = t;
+                } else {
+                    // se igual e já passou debounce -> atualizar estado estável
+                    if (!stable_state[m][ch] && (t - last_change_ms[m][ch] >= DEBOUNCE_MS)) {
+                        stable_state[m][ch] = raw_pressed;
+                    } else if (stable_state[m][ch] && (t - last_change_ms[m][ch] >= DEBOUNCE_MS)) {
+                        // manter estado (se já era pressed e continua)
+                        stable_state[m][ch] = raw_pressed;
+                    }
+                }
+
+                // detectar borda solto -> pressionado
+                if (!prev_stable[m][ch] && stable_state[m][ch]) {
+                    // botão passou a PRESSED de forma estável
+                    char out = button_map[m][ch];
+                    if (out != '\0') {
+                        adc_t click = {.axis = 3, .val = m * 8 + ch + 1}; // Pressiona
+                        xQueueSend(xQueuePos, &click, pdMS_TO_TICKS(10));
+                        // registra tempo do envio
+                        last_send_ms[m][ch] = t + REPEAT_INITIAL_MS; // inicial delay antes do próximo repeat
+                    }
+                } else if (stable_state[m][ch]) {
+                    // já estava pressionado: checar se é hora do próximo repeat
+                    if ((int32_t)(t - last_send_ms[m][ch]) >= (int32_t)REPEAT_INTERVAL_MS) {
+                        char out = button_map[m][ch];
+                        if (out != '\0') {
+                            adc_t click = {.axis = 3, .val = m * 8 + ch + 1}; // Pressiona
+                            xQueueSend(xQueuePos, &click, pdMS_TO_TICKS(10));
+                            last_send_ms[m][ch] = t;
+                        }
+                    }
+                }
+                prev_stable[m][ch] = stable_state[m][ch];
+            }
+        }
+
+        // atraso curto entre varreduras para não saturar CPU
+        vTaskDelay(pdMS_TO_TICKS(VARREDURA_DELAY_MS));
+    }
+}
 
 static void mpu6050_reset() {
     // Two byte reset. First byte register, second byte data
@@ -86,7 +186,7 @@ void mpu6050_task(void *p) {
     FusionAhrs ahrs;
     FusionAhrsInitialise(&ahrs);
     FusionEuler euler;
-    //int yaw_anterior = 0;
+    // int yaw_anterior = 0;
 
     while (true) {
 
@@ -113,15 +213,13 @@ void mpu6050_task(void *p) {
         adc_t adc_y = {.axis = 0, .val = euler.angle.pitch};
         xQueueSend(xQueuePos, &adc_y, pdMS_TO_TICKS(10));
 
-        
-        
         // === Controle de clique baseado no Yaw ===
         if (abs(acceleration[1]) > 10000) {
             adc_t click = {.axis = 3, .val = 0}; // Pressiona
             xQueueSend(xQueuePos, &click, pdMS_TO_TICKS(10));
         }
 
-                vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -170,11 +268,13 @@ void uart_task(void *p) {
 
 int main() {
     stdio_init_all();
+    init_pins_uart();
     adc_init();
 
     xQueuePos = xQueueCreate(16, sizeof(adc_t));
-    xTaskCreate(mpu6050_task, "mpu6050_Task 1", 8192, NULL, 1, NULL);
-    xTaskCreate(incline_task, "incline_Task", 4095, NULL, 2, NULL);
+    xTaskCreate(mux_task, "mux_task", 4095, NULL, 1, NULL);
+    // xTaskCreate(mpu6050_task, "mpu6050_Task 1", 8192, NULL, 1, NULL);
+    // xTaskCreate(incline_task, "incline_Task", 4095, NULL, 2, NULL);
     xTaskCreate(uart_task, "oled_task", 4095, NULL, 1, NULL);
 
     vTaskStartScheduler();
